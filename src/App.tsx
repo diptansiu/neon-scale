@@ -3,7 +3,7 @@ import { detectCapabilities, preferredProviders, Capabilities } from "./lib/capa
 import { MODEL_REGISTRY, CLOUD_MODELS, CloudModel } from "./lib/modelRegistry";
 import { downloadModel, hasCachedModel, getModelObjectUrl, deleteCachedModel } from "./lib/modelDownloader";
 import { InferenceWorkerClient } from "./lib/workerClient";
-import { decodeImage, bitmapToImageData, imageDataToBlob, downloadBlob } from "./lib/imageUtils";
+import { decodeImage, bitmapToImageData, imageDataToBlob, downloadBlob, memoryPreflight } from "./lib/imageUtils";
 import { resources } from "./lib/processingEngine";
 
 export default function App() {
@@ -61,6 +61,13 @@ export default function App() {
     setError("");
     try {
       const { bitmap, info } = await decodeImage(file);
+      const pf = memoryPreflight(info.width, info.height);
+      if (!pf.ok) {
+        bitmap.close();
+        throw new Error(pf.message);
+      }
+      // revoke previous original url
+      if (originalUrl) resources.revokeUrl(originalUrl);
       const url = URL.createObjectURL(file);
       resources.trackUrl(url);
       setOriginalUrl(url);
@@ -70,6 +77,7 @@ export default function App() {
       setElapsedMs(null);
       currentFileRef.current = file;
       bitmap.close();
+      if (pf.message) setError(pf.message);
     } catch (e: any) {
       setError(e.message || "Invalid image");
     }

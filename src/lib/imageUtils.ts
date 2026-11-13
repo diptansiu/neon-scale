@@ -54,3 +54,15 @@ export function estimateMemory(width: number, height: number): number {
   // bytes for RGBA + a few buffers
   return width * height * 4 * 4;
 }
+
+export function memoryPreflight(width: number, height: number): { ok: boolean; message: string } {
+  const mem = estimateMemory(width, height);
+  const limit = 512 * 1024 * 1024; // 512MB heuristic
+  if (mem > limit) {
+    return { ok: false, message: `Image too large for safe processing (~${Math.round(mem / 1024 / 1024)}MB estimated).` };
+  }
+  if (mem > limit / 2) {
+    return { ok: true, message: `Large image (~${Math.round(mem / 1024 / 1024)}MB). Processing may be slow.` };
+  }
+  return { ok: true, message: "" };
+}

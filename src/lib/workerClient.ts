@@ -14,6 +14,9 @@ export class InferenceWorkerClient {
   constructor() {
     this.worker = new Worker(new URL("../workers/inference.worker.ts", import.meta.url), { type: "module" });
     this.onProgress = () => {};
+    this.worker.onerror = (e) => {
+      console.error("Worker error:", e.message);
+    };
   }
 
   setProgressHandler(h: (v: number, msg: string) => void) { this.onProgress = h; }
@@ -35,7 +38,7 @@ export class InferenceWorkerClient {
     });
   }
 
-  async run(req: RunRequest): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
+  async run(req: RunRequest): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; elapsedMs?: number }> {
     return new Promise((resolve, reject) => {
       const handler = (e: MessageEvent) => {
         const m = e.data;
@@ -43,7 +46,7 @@ export class InferenceWorkerClient {
           this.onProgress(m.value, m.message);
         } else if (m.type === "result") {
           this.worker.removeEventListener("message", handler);
-          resolve({ rgba: m.rgba, width: m.width, height: m.height });
+          resolve({ rgba: m.rgba, width: m.width, height: m.height, elapsedMs: m.elapsedMs });
         } else if (m.type === "cancelled") {
           this.worker.removeEventListener("message", handler);
           reject(new Error("Cancelled"));

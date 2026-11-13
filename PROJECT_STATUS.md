@@ -1,5 +1,15 @@
 # Project Status
 
+## Stage 2 (Quality/Performance/Reliability) — completed
+
+- Memory-aware tile sizing (64/96/128 based on pixel count).
+- Shared tile planner (planTiles) used by worker and tests.
+- Job staleness guard (jobIdRef) prevents stale results overwriting newer ones.
+- Performance timing reported from worker (elapsedMs) and shown in UI.
+- Worker crash handler (onerror).
+- ARIA labels on dropzone and progress bar.
+- 14 unit tests pass (added 6 tiling tests).
+
 ## Stage status
 
 | Stage | Status |

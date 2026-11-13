@@ -36,6 +36,7 @@ export default function App() {
   const [resultUrl, setResultUrl] = useState("");
   const [originalInfo, setOriginalInfo] = useState<{ w: number; h: number } | null>(null);
   const [resultInfo, setResultInfo] = useState<{ w: number; h: number } | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [comparePos, setComparePos] = useState(50);
   const [dragging, setDragging] = useState(false);
 
@@ -43,6 +44,7 @@ export default function App() {
   const currentFileRef = useRef<File | null>(null);
   const workerRef = useRef<InferenceWorkerClient | null>(null);
   const cancelledRef = useRef(false);
+  const jobIdRef = useRef(0);
 
   useEffect(() => {
     detectCapabilities().then(setCaps);
@@ -93,6 +95,7 @@ export default function App() {
     if (scale !== 4) { setError("Only 4× AI upscaling is supported by the loaded model."); return; }
     setError("");
     cancelledRef.current = false;
+    const thisJob = ++jobIdRef.current;
     setStatus("validating");
     setProgress(0);
     setMessage("Validating image");
@@ -143,6 +146,7 @@ export default function App() {
         tileSize,
         overlap,
       });
+      setElapsedMs(result.elapsedMs ?? null);
 
       setStatus("postprocessing");
       setMessage("Reconstructing");
@@ -150,6 +154,7 @@ export default function App() {
 
       const outImageData = new ImageData(result.rgba, result.width, result.height);
       const blob = await imageDataToBlob(outImageData, "image/png");
+      if (thisJob !== jobIdRef.current) return; // stale job
       const url = URL.createObjectURL(blob);
       resources.trackUrl(url);
       setResultUrl(url);
@@ -285,6 +290,9 @@ export default function App() {
               <div className="stack">
                 <div
                   className={`dropzone ${dragging ? "drag" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Drop an image here or choose a file"
                   onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                   onDragLeave={() => setDragging(false)}
                   onDrop={onDrop}
@@ -379,9 +387,9 @@ export default function App() {
                   {busy ? "PROCESSING…" : "UPSCALE IMAGE"}
                 </button>
 
-                <div className="progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>
+                <div className="progress" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>
                 {message && <div className="msg info">{status.toUpperCase()} — {message}</div>}
-                {status === "completed" && <div className="msg ok">COMPLETE · {resultInfo?.w} × {resultInfo?.h}</div>}
+                {status === "completed" && <div className="msg ok">COMPLETE · {resultInfo?.w} × {resultInfo?.h}{elapsedMs ? ` · ${elapsedMs}ms` : ""}</div>}
 
                 {/* Technical status */}
                 <div className="card-soft" style={{ marginTop: 16 }}>

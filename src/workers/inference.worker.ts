@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import * as ort from "onnxruntime-web/webgpu";
+import { planTiles, memoryAwareTileSize } from "../lib/tiling";
 
 let session: any = null;
 let activeProvider = "wasm";
@@ -44,6 +45,7 @@ self.onmessage = async (e: MessageEvent) => {
     if (msg.type === "run") {
       cancelled = false;
       const { rgba, width, height, tileSize, overlap } = msg;
+      const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now();
       const scale = 4;
       const outW = width * scale;
       const outH = height * scale;
@@ -52,17 +54,9 @@ self.onmessage = async (e: MessageEvent) => {
       const alphaSrc = new Uint8Array(width * height);
       for (let i = 0; i < width * height; i++) alphaSrc[i] = rgba[i * 4 + 3];
 
-      // Tile geometry
-      const tiles: { x: number; y: number; w: number; h: number }[] = [];
-      const step = tileSize - overlap;
-      for (let y = 0; y < height; y += step) {
-        for (let x = 0; x < width; x += step) {
-          const w = Math.min(tileSize, width - x);
-          const h = Math.min(tileSize, height - y);
-          tiles.push({ x, y, w, h });
-        }
-      }
-      // dedupe trailing small tiles by snapping? keep simple
+      // Tile geometry (memory-aware, shared with tests)
+      const effectiveTile = memoryAwareTileSize(width, height, tileSize);
+      const tiles = planTiles(width, height, effectiveTile, overlap);
 
       const outRgba = new Uint8ClampedArray(outW * outH * 4);
       // weight buffer for blending
@@ -177,7 +171,8 @@ self.onmessage = async (e: MessageEvent) => {
         }
       }
 
-      postMessage({ type: "result", rgba: outRgba, width: outW, height: outH }, [outRgba.buffer]);
+      const elapsed = ((typeof performance !== "undefined") ? performance.now() : Date.now()) - t0;
+      postMessage({ type: "result", rgba: outRgba, width: outW, height: outH, elapsedMs: Math.round(elapsed) }, [outRgba.buffer]);
     }
   } catch (err: any) {
     postMessage({ type: "error", message: err?.message || String(err) });

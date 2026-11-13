@@ -1,0 +1,49 @@
+export interface ImageInfo {
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+}
+
+export async function decodeImage(file: File): Promise<{ bitmap: ImageBitmap; info: ImageInfo }> {
+  if (!file.type.startsWith("image/")) throw new Error("Unsupported file type");
+  const bitmap = await createImageBitmap(file);
+  // detect alpha by drawing to canvas and sampling? Heuristic: check type
+  const hasAlpha = file.type === "image/png" || file.type === "image/webp";
+  return { bitmap, info: { width: bitmap.width, height: bitmap.height, hasAlpha } };
+}
+
+export function bitmapToImageData(bitmap: ImageBitmap): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0);
+  return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+}
+
+export function imageDataToBlob(imageData: ImageData, type: string, quality?: number): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.putImageData(imageData, 0, 0);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), type, quality);
+  });
+}
+
+export function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function estimateMemory(width: number, height: number): number {
+  // bytes for RGBA + a few buffers
+  return width * height * 4 * 4;
+}

@@ -7,5 +7,5 @@
 - No ICC profile preservation.
 - EXIF orientation not explicitly handled.
 - Large images depend on device memory; tile size adjustable.
-- Cloud AI mode is BLOCKED: no verified free endpoint + backend proxy. Local mode fully functional.
+- Cloud AI mode VERIFIED via Hugging Face ZeroGPU (DipuMeh/neon-scale-cloud). Free tier quota: 5 min/day (free account), 2 min/day (unauthenticated).
 - Offline requires prior caching of app + model.

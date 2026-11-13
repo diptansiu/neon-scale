@@ -73,8 +73,8 @@ export const CLOUD_MODELS: CloudModel[] = [
     nativeScale: 4,
     description: "Remote inference via free Hugging Face endpoint. Requires backend proxy for secure credentials.",
     license: "BSD-3-Clause (weights)",
-    status: "blocked",
-    blockReason: "No secure backend proxy available; free-tier quota and CORS unverified. Local mode fully functional.",
+    status: "available",
+    blockReason: undefined,
   },
 ];
 

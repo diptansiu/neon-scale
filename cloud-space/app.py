@@ -7,9 +7,17 @@ GPU is allocated only during inference via the @spaces.GPU decorator.
 """
 
 import os
+import sys
+import types
 import tempfile
 import uuid
 from typing import Tuple
+
+# Compatibility shim: newer torchvision removed functional_tensor module.
+import torchvision.transforms.functional as _F
+_fake_ft = types.ModuleType("torchvision.transforms.functional_tensor")
+_fake_ft.rgb_to_grayscale = _F.rgb_to_grayscale
+sys.modules["torchvision.transforms.functional_tensor"] = _fake_ft
 
 import numpy as np
 import spaces

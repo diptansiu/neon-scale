@@ -1,3 +1,15 @@
+---
+title: Neon Scale Cloud
+emoji: ⚡
+colorFrom: gray
+colorTo: gray
+sdk: gradio
+sdk_version: "5.49.1"
+app_file: app.py
+python_version: "3.10"
+pinned: false
+---
+
 # NEON//SCALE Cloud Upscaler (ZeroGPU)
 
 Gradio Space running Real-ESRGAN x4plus (RRDBNet, 23 blocks) for 4x super-resolution on Hugging Face ZeroGPU.

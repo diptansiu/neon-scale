@@ -91,7 +91,7 @@ export default function App() {
   const run = useCallback(async () => {
     const file = currentFileRef.current;
     if (!file) { setError("No image loaded"); return; }
-    if (mode === "cloud") { setError("Cloud inference is not available: no verified free endpoint configured."); return; }
+    if (mode === "cloud") { await runCloud(); return; }
     if (scale !== 4) { setError("Only 4× AI upscaling is supported by the loaded model."); return; }
     setError("");
     cancelledRef.current = false;
@@ -174,6 +174,127 @@ export default function App() {
       }
     }
   }, [caps, selectedModel, variant, scale, tileSize, overlap]);
+
+  const runCloud = useCallback(async () => {
+    const file = currentFileRef.current;
+    if (!file) { setError("No image loaded"); return; }
+    setError("");
+    cancelledRef.current = false;
+    setStatus("validating");
+    setProgress(0);
+    setMessage("Validating image");
+    try {
+      const { bitmap, info } = await decodeImage(file);
+      bitmap.close();
+
+      setStatus("checking_provider" as any);
+      setMessage("Checking provider");
+      setProgress(0.05);
+
+      const CLOUD_URL = "https://dipumeh-neon-scale-cloud.hf.space";
+
+      // Convert file to base64 data URL
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("File read failed"));
+        reader.readAsDataURL(file);
+      });
+
+      setStatus("uploading" as any);
+      setMessage("Uploading");
+      setProgress(0.15);
+
+      const fileData = {
+        path: null,
+        url: dataUrl,
+        orig_name: file.name,
+        mime_type: file.type,
+        is_stream: false,
+        meta: { _type: "gradio.FileData" },
+      };
+
+      const submitRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: [fileData] }),
+      });
+      if (!submitRes.ok) throw new Error(`Submit failed: ${submitRes.status}`);
+      const submitJson = await submitRes.json();
+      const eventId = submitJson.event_id;
+      if (!eventId) throw new Error("No event id returned");
+
+      setStatus("queued" as any);
+      setMessage("Queued");
+      setProgress(0.3);
+
+      // Poll SSE stream
+      const streamRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict/${eventId}`);
+      if (!streamRes.ok) throw new Error(`Stream failed: ${streamRes.status}`);
+      const text = await streamRes.text();
+
+      // Parse SSE for complete event
+      let resultUrl: string | null = null;
+      const lines = text.split("\\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith("event: complete")) {
+          // next data line
+          const dataLine = lines[i + 1];
+          if (dataLine && dataLine.startsWith("data:")) {
+            const jsonStr = dataLine.slice(5).trim();
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const arr = Array.isArray(parsed) ? parsed : [parsed];
+              const first = arr[0];
+              if (first && first.url) resultUrl = first.url;
+              else if (first && first.path) resultUrl = `${CLOUD_URL}/gradio_api/file=${first.path}`;
+            } catch {}
+          }
+        }
+        if (lines[i].startsWith("event: error")) {
+          throw new Error("Cloud inference failed on provider side");
+        }
+      }
+      if (!resultUrl) throw new Error("No result URL returned");
+
+      setStatus("retrieving" as any);
+      setMessage("Retrieving result");
+      setProgress(0.85);
+
+      // Fetch result image and convert
+      const imgRes = await fetch(resultUrl);
+      if (!imgRes.ok) throw new Error(`Result fetch failed: ${imgRes.status}`);
+      const blob = await imgRes.blob();
+      const objUrl = URL.createObjectURL(blob);
+      resources.trackUrl(objUrl);
+
+      // Validate dimensions (decode)
+      const img = new Image();
+      img.src = objUrl;
+      await img.decode();
+      const outW = img.naturalWidth;
+      const outH = img.naturalHeight;
+      if (info && (outW !== info.width * 4 || outH !== info.height * 4)) {
+        // not fatal, but note
+      }
+
+      setResultUrl(objUrl);
+      setResultInfo({ w: outW, h: outH });
+
+      setStatus("completed");
+      setMessage("Completed");
+      setProgress(1);
+    } catch (e: any) {
+      if (cancelledRef.current || /cancel/i.test(e.message)) {
+        setStatus("cancelled");
+        setMessage("Cancelled");
+      } else {
+        setStatus("failed");
+        setError(e.message);
+        setMessage("Failed");
+      }
+    }
+  }, [caps]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;

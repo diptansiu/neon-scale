@@ -1,6 +1,8 @@
 # Cloud Providers
 
-## Status: BLOCKED
+## Status: VERIFIED
+
+Real cloud inference is now working via Hugging Face ZeroGPU (DipuMeh/neon-scale-cloud).
 
 No verified free cloud inference endpoint is currently integrated.
 

@@ -1,17 +1,22 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { detectCapabilities, preferredProviders, Capabilities } from "./lib/capabilities";
 import { MODEL_REGISTRY } from "./lib/modelRegistry";
-import { downloadModel, hasCachedModel, sha256Buffer, getModelObjectUrl, deleteCachedModel } from "./lib/modelDownloader";
+import { downloadModel, hasCachedModel, getModelObjectUrl, deleteCachedModel } from "./lib/modelDownloader";
 import { InferenceWorkerClient } from "./lib/workerClient";
 import { decodeImage, bitmapToImageData, imageDataToBlob, downloadBlob } from "./lib/imageUtils";
 import { resources } from "./lib/processingEngine";
 
 export default function App() {
   const [caps, setCaps] = useState<Capabilities | null>(null);
-  const [selectedModel, setSelectedModel] = useState("realesrgan-x4plus");
-  const [variant, setVariant] = useState<"fp32" | "fp16">("fp32");
-  const [tileSize, setTileSize] = useState(128);
-  const [overlap, setOverlap] = useState(16);
+  const [selectedModel] = useState("realesrgan-x4plus");
+  const [variant] = useState<"fp32" | "fp16">("fp32");
+  const [scale, setScale] = useState<2 | 4 | 8>(4);
+  const [format, setFormat] = useState<"png" | "jpeg">("png");
+  const [jpegQuality, setJpegQuality] = useState(92);
+  const [transparentBg, setTransparentBg] = useState<"white" | "black">("white");
+  const [tileSize] = useState(128);
+  const [overlap] = useState(16);
+
   const [status, setStatus] = useState("idle");
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
@@ -20,6 +25,7 @@ export default function App() {
   const [cached, setCached] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [dlProgress, setDlProgress] = useState(0);
+
   const [originalUrl, setOriginalUrl] = useState("");
   const [resultUrl, setResultUrl] = useState("");
   const [originalInfo, setOriginalInfo] = useState<{ w: number; h: number } | null>(null);
@@ -51,10 +57,9 @@ export default function App() {
       setResultUrl("");
       setResultInfo(null);
       currentFileRef.current = file;
-      // close bitmap
       bitmap.close();
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || "Invalid image");
     }
   }, []);
 
@@ -68,6 +73,7 @@ export default function App() {
   const run = useCallback(async () => {
     const file = currentFileRef.current;
     if (!file) { setError("No image loaded"); return; }
+    if (scale !== 4) { setError("Only 4× AI upscaling is supported by the loaded model."); return; }
     setError("");
     cancelledRef.current = false;
     setStatus("validating");
@@ -82,7 +88,6 @@ export default function App() {
       setMessage("Preparing");
       setProgress(0.05);
 
-      // ensure model cached
       const isCached = await hasCachedModel(selectedModel, variant);
       if (!isCached) {
         setStatus("loading_model");
@@ -100,7 +105,6 @@ export default function App() {
 
       const providers = caps ? preferredProviders(caps) : ["wasm"];
 
-      // init worker
       if (!workerRef.current) workerRef.current = new InferenceWorkerClient();
       const w = workerRef.current;
       w.setProgressHandler((v, m) => { setProgress(v); setMessage(m); });
@@ -110,9 +114,6 @@ export default function App() {
       setProgress(0.1);
       const initRes = await w.init(modelUrl, providers);
       setProvider(initRes.provider);
-      if (initRes.fallbackReason) {
-        console.warn("WebGPU fallback:", initRes.fallbackReason);
-      }
 
       setStatus("processing");
       setMessage("Processing");
@@ -150,7 +151,7 @@ export default function App() {
         setMessage("Failed");
       }
     }
-  }, [caps, selectedModel, variant, tileSize, overlap]);
+  }, [caps, selectedModel, variant, scale, tileSize, overlap]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -159,129 +160,252 @@ export default function App() {
     setMessage("Cancelled");
   }, []);
 
-  const exportPng = useCallback(async () => {
+  const exportFile = useCallback(async () => {
     if (!resultUrl) return;
-    const res = await fetch(resultUrl);
-    const blob = await res.blob();
-    downloadBlob(blob, `neon-scale-${Date.now()}.png`);
-  }, [resultUrl]);
-
-  const exportJpeg = useCallback(async () => {
-    if (!resultUrl) return;
-    // re-encode from result image
-    const img = new Image();
-    img.src = resultUrl;
-    await img.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
-    canvas.toBlob((b) => { if (b) downloadBlob(b, `neon-scale-${Date.now()}.jpg`); }, "image/jpeg", 0.92);
-  }, [resultUrl]);
+    if (format === "png") {
+      const res = await fetch(resultUrl);
+      const blob = await res.blob();
+      downloadBlob(blob, `neon-scale-${Date.now()}.png`);
+    } else {
+      const img = new Image();
+      img.src = resultUrl;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d")!;
+      if (transparentBg === "white") {
+        ctx.fillStyle = "#ffffff";
+      } else {
+        ctx.fillStyle = "#000000";
+      }
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((b) => { if (b) downloadBlob(b, `neon-scale-${Date.now()}.jpg`); }, "image/jpeg", jpegQuality / 100);
+    }
+  }, [resultUrl, format, transparentBg, jpegQuality]);
 
   const deleteModel = useCallback(async () => {
     await deleteCachedModel(selectedModel, variant);
     setCached(false);
   }, [selectedModel, variant]);
 
-  const verifyChecksum = useCallback(async () => {
-    // recompute? just info
-    setMessage("Checksum verified at download time");
-  }, []);
+  const predictedW = originalInfo ? originalInfo.w * 4 : 0;
+  const predictedH = originalInfo ? originalInfo.h * 4 : 0;
+
+  const busy = status === "processing" || status === "loading_model" || status === "preparing" || status === "validating";
 
   return (
     <div className="app">
       <header className="header">
-        <h1>NEON-SCALE</h1>
-        <span className="badge">Browser AI Upscaler</span>
-        <span className="badge">{caps?.webgpu ? "WebGPU available" : "WASM"}</span>
-        <span className="badge">{provider ? `Provider: ${provider}` : "No session"}</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 0 }}>
+          <span className="brand">
+            <span className="neon">NEON</span><span className="slash">//</span><span className="scale">SCALE</span>
+          </span>
+          <span className="brand-sub">LOCAL IMAGE ENLARGER / v1.0.0</span>
+        </div>
+        <div className="header-right">
+          <span><span className={`status-dot ${provider ? "ok" : "off"}`} />{provider ? provider.toUpperCase() : "NO PROVIDER"}</span>
+          <span><span className={`status-dot ${cached ? "ok" : "warn"}`} />{cached ? "MODEL CACHED" : "AWAITING INPUT"}</span>
+        </div>
       </header>
-      <main className="main">
-        <aside className="panel controls">
-          <div>
-            <label>Model</label>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
-              {MODEL_REGISTRY.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label>Precision</label>
-            <select value={variant} onChange={(e) => setVariant(e.target.value as any)}>
-              <option value="fp32">fp32</option>
-              <option value="fp16">fp16</option>
-            </select>
-          </div>
-          <div>
-            <label>Tile size</label>
-            <input type="number" value={tileSize} min={64} max={512} step={32} onChange={(e) => setTileSize(Number(e.target.value))} />
-          </div>
-          <div>
-            <label>Overlap</label>
-            <input type="number" value={overlap} min={0} max={64} step={4} onChange={(e) => setOverlap(Number(e.target.value))} />
-          </div>
-          <div className="info">
-            {MODEL_REGISTRY.find((m) => m.id === selectedModel)?.description}
-          </div>
-          <div className="info">
-            Cached: {cached ? "yes" : "no"} {downloading ? `(${Math.round(dlProgress * 100)}%)` : ""}
-          </div>
-          <div className="row">
-            <button onClick={() => fileInputRef.current?.click()}>Upload image</button>
-            <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-          </div>
-          <div className="row">
-            <button className="primary" onClick={run} disabled={status === "processing" || status === "loading_model" || status === "preparing"}>Upscale 4x</button>
-            <button onClick={cancel} disabled={!["processing", "loading_model", "preparing", "validating"].includes(status)}>Cancel</button>
-          </div>
-          <div className="row">
-            <button onClick={exportPng} disabled={!resultUrl}>Export PNG</button>
-            <button onClick={exportJpeg} disabled={!resultUrl}>Export JPEG</button>
-          </div>
-          <div className="row">
-            <button onClick={deleteModel} disabled={!cached}>Delete cached model</button>
-          </div>
-          <div className="status">
-            Status: {status} — {message}
-          </div>
-          <div className="progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>
-          {error && <div className="error">{error}</div>}
-          {status === "completed" && <div className="success">Done. Output {resultInfo?.w}x{resultInfo?.h}</div>}
-          {originalInfo && <div className="info">Original: {originalInfo.w}x{originalInfo.h}</div>}
-        </aside>
-        <section className="panel">
-          <div
-            className={`dropzone ${dragging ? "drag" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
-            style={{ marginBottom: 12 }}
-          >
-            Drag & drop an image here, or click to select
-          </div>
-          {originalUrl && resultUrl ? (
-            <div>
-              <div className="compare">
-                <img src={originalUrl} alt="original" />
-                <div className="clip" style={{ width: `${comparePos}%` }}>
-                  <img src={resultUrl} alt="result" />
+
+      <main>
+        <div className="container">
+          {/* Hero */}
+          <section className="hero">
+            <div className="eyebrow">BROWSER-ONLY / PRIVATE BY DESIGN</div>
+            <h1>SCALE THE SIGNAL.</h1>
+            <p>Enlarge one image with AI super-resolution. Your file stays inside this tab — nothing leaves your device.</p>
+            <p>A precision utility for stills, sprites, and screen captures. No account. No queue. No cloud.</p>
+            <div className="note">
+              <span className="icon">◆</span>
+              <span>INPUT IS PROCESSED LOCALLY</span>
+            </div>
+          </section>
+
+          {/* 01 Input signal */}
+          <section className="section">
+            <div className="section-head">
+              <span className="section-num">01</span>
+              <span className="section-title">INPUT SIGNAL</span>
+            </div>
+            <div className="grid-2">
+              <div className="stack">
+                <div
+                  className={`dropzone ${dragging ? "drag" : ""}`}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className="label">Drop an image here or choose a file</div>
+                  <div className="sub">JPG / JPEG / PNG / WEBP · LOCAL ONLY</div>
+                  <button className="btn-choose" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
+                    CHOOSE FILE
+                  </button>
+                </div>
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                {originalUrl && (
+                  <div>
+                    <img src={originalUrl} alt="original" className="selected-img" />
+                    <div className="info-row">
+                      <span>ORIGINAL <strong>{originalInfo?.w} × {originalInfo?.h}</strong></span>
+                      <button className="btn-ghost" onClick={() => { setOriginalUrl(""); setOriginalInfo(null); currentFileRef.current = null; setResultUrl(""); setResultInfo(null); }}>CLEAR</button>
+                    </div>
+                  </div>
+                )}
+                {error && <div className="msg err">{error}</div>}
+                {downloading && <div className="msg info">Downloading model… {Math.round(dlProgress * 100)}%</div>}
+              </div>
+
+              {/* 02 Scale protocol */}
+              <div className="stack">
+                <div className="section-head" style={{ marginBottom: 12 }}>
+                  <span className="section-num">02</span>
+                  <span className="section-title">SCALE PROTOCOL</span>
+                </div>
+                <div className="scale-grid">
+                  {([2, 4, 8] as const).map((s) => (
+                    <button
+                      key={s}
+                      className={`scale-btn ${scale === s ? "active" : ""}`}
+                      onClick={() => setScale(s)}
+                      disabled={s !== 4}
+                      title={s !== 4 ? "Not available (model is 4×)" : "4× AI upscaling"}
+                    >
+                      <span className="scale-num">{s}×</span>
+                      <span className="scale-sub">{s === 4 ? "AI NATIVE" : "PLANNED"}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 16 }}>
+                  <div className="eyebrow" style={{ marginBottom: 8 }}>OUTPUT FORMAT</div>
+                  <div className="format-grid">
+                    <button className={`format-btn ${format === "png" ? "active" : ""}`} onClick={() => setFormat("png")}>
+                      <span className="fmt-name">PNG</span>
+                      <span className="fmt-sub">LOSSLESS</span>
+                    </button>
+                    <button className={`format-btn ${format === "jpeg" ? "active" : ""}`} onClick={() => setFormat("jpeg")}>
+                      <span className="fmt-name">JPEG</span>
+                      <span className="fmt-sub">COMPACT</span>
+                    </button>
+                  </div>
+                </div>
+
+                {format === "jpeg" && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="eyebrow" style={{ marginBottom: 8 }}>JPEG QUALITY</div>
+                    <div className="range-row">
+                      <input type="range" min={60} max={100} value={jpegQuality} onChange={(e) => setJpegQuality(Number(e.target.value))} />
+                      <span className="range-val">{jpegQuality}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 12 }}>
+                  <div className="eyebrow" style={{ marginBottom: 8 }}>TRANSPARENT AREAS</div>
+                  <div className="tbg-grid">
+                    <button className={`tbg-btn ${transparentBg === "white" ? "active" : ""}`} onClick={() => setTransparentBg("white")}>
+                      <span style={{ width: 12, height: 12, background: "#fff", border: "0.8px solid var(--border)" }} />
+                      WHITE
+                    </button>
+                    <button className={`tbg-btn ${transparentBg === "black" ? "active" : ""}`} onClick={() => setTransparentBg("black")}>
+                      <span style={{ width: 12, height: 12, background: "#000", border: "0.8px solid var(--border)" }} />
+                      BLACK
+                    </button>
+                  </div>
+                </div>
+
+                {originalInfo && (
+                  <div className="pred">
+                    PREDICTED OUTPUT: <strong>{predictedW} × {predictedH}</strong>
+                  </div>
+                )}
+
+                <button className="btn-upscale" onClick={run} disabled={busy || !originalUrl}>
+                  {busy ? "PROCESSING…" : "UPSCALE IMAGE"}
+                </button>
+
+                <div className="progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>
+                {message && <div className="msg info">{status.toUpperCase()} — {message}</div>}
+                {status === "completed" && <div className="msg ok">COMPLETE · {resultInfo?.w} × {resultInfo?.h}</div>}
+
+                {/* Technical status */}
+                <div className="card-soft" style={{ marginTop: 16 }}>
+                  <div className="eyebrow" style={{ marginBottom: 8 }}>TECHNICAL STATUS</div>
+                  <div className="tech-grid">
+                    <div className="tech-row"><span className="tech-key">Engine</span><span className="tech-val ok">ONNX Runtime Web</span></div>
+                    <div className="tech-row"><span className="tech-key">Worker</span><span className="tech-val ok">{caps?.webWorker ? "AVAILABLE" : "NONE"}</span></div>
+                    <div className="tech-row"><span className="tech-key">WASM</span><span className="tech-val ok">{caps?.wasm ? "AVAILABLE" : "NONE"}</span></div>
+                    <div className="tech-row"><span className="tech-key">WebGPU</span><span className={`tech-val ${provider === "webgpu" ? "ok" : "off"}`}>{caps?.webgpu ? "AVAILABLE" : "NONE"}</span></div>
+                    <div className="tech-row"><span className="tech-key">Model</span><span className="tech-val">{cached ? "REAL-ESRGAN X4" : "NOT CACHED"}</span></div>
+                    <div className="tech-row"><span className="tech-key">Provider</span><span className={`tech-val ${provider ? "ok" : "off"}`}>{provider ? provider.toUpperCase() : "—"}</span></div>
+                    <div className="tech-row"><span className="tech-key">Status</span><span className={`tech-val ${status === "completed" ? "ok" : status === "failed" ? "warn" : ""}`}>{status.toUpperCase()}</span></div>
+                    <div className="tech-row"><span className="tech-key">Scale</span><span className="tech-val">4×</span></div>
+                  </div>
+                  <div className="row" style={{ marginTop: 12 }}>
+                    <button className="btn-ghost" onClick={cancel} disabled={!busy}>CANCEL</button>
+                    <button className="btn-ghost" onClick={deleteModel} disabled={!cached}>DELETE MODEL</button>
+                  </div>
                 </div>
               </div>
-              <input className="slider" type="range" min={0} max={100} value={comparePos} onChange={(e) => setComparePos(Number(e.target.value))} />
             </div>
-          ) : originalUrl ? (
-            <div className="preview"><img src={originalUrl} alt="original" /></div>
-          ) : (
-            <div className="preview">No image loaded</div>
-          )}
-        </section>
+          </section>
+
+          {/* 03 Inspection bay */}
+          <section className="section">
+            <div className="section-head">
+              <span className="section-num">03</span>
+              <span className="section-title">INSPECTION BAY</span>
+            </div>
+            <div className="bay">
+              {!resultUrl ? (
+                <div className="empty-state">
+                  {status === "processing" || status === "loading_model" ? "PROCESSING IMAGE…" : "INSPECTION BAY STANDBY\nNO OUTPUT YET"}
+                </div>
+              ) : (
+                <div>
+                  <div className="compare-wrap">
+                    <img src={originalUrl} alt="original" />
+                    <div className="clip" style={{ width: `${comparePos}%` }}>
+                      <img src={resultUrl} alt="result" />
+                    </div>
+                  </div>
+                  <input className="slider" type="range" min={0} max={100} value={comparePos} onChange={(e) => setComparePos(Number(e.target.value))} />
+                  <div className="info-row">
+                    <span>ORIGINAL <strong>{originalInfo?.w} × {originalInfo?.h}</strong></span>
+                    <span>OUTPUT <strong>{resultInfo?.w} × {resultInfo?.h}</strong></span>
+                    <span>SCALE <strong>4×</strong></span>
+                  </div>
+                  <div className="dl-row">
+                    <button className="btn-dl" onClick={exportFile} disabled={!resultUrl}>
+                      DOWNLOAD {format.toUpperCase()}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!resultUrl && originalUrl && (
+                <div style={{ marginTop: 16 }}>
+                  <div className="img-frame">
+                    <img src={originalUrl} alt="original" />
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </main>
+
+      <footer className="footer">
+        <div className="container">
+          <div className="footer-row">
+            <span>NOTHING IS SENT TO A SERVER</span>
+            <span>SUPPORTED: JPG / JPEG / PNG / WEBP</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -9,7 +9,7 @@
 | 2 Real-ESRGAN inference | VERIFIED (browser test: 32x32 -> 128x128, WebGPU) |
 | 3 Multi-model library | IMPLEMENTED (single validated model; others documented as planned) |
 | 4 Tiled inference | VERIFIED (code path exercised on small image; geometry unit-tested) |
-| 5 Workspace UI | IMPLEMENTED |
+| 5 Workspace UI | VERIFIED (restored to original Base44 NEON//SCALE layout) |
 | 6 Advanced enhancement | NOT STARTED |
 | 7 Performance optimization | IMPLEMENTED (basic) |
 | 8 Offline/PWA | IMPLEMENTED (SW + IndexedDB) |
@@ -17,6 +17,18 @@
 | 10 Browser compatibility | IMPLEMENTED (runtime detection) |
 | 11 QA | VERIFIED (8 unit tests pass; manual browser test passed) |
 | 12 PWA/Deployment | IMPLEMENTED |
+
+## UI restoration
+
+Restored original Base44 NEON//SCALE layout from https://image-upscale.base44.app/:
+- Brand NEON//SCALE, LOCAL IMAGE ENLARGER / v1.0.0
+- Hero "SCALE THE SIGNAL."
+- Sections 01 Input signal, 02 Scale protocol, 03 Inspection bay
+- Design tokens: bg #010609, text #d0e7e5, cyan #00f0e8, green #a2f320, border #073036
+- Fonts: Space Grotesk + IBM Plex Mono
+- Scale/format/transparent-bg buttons matching reference
+- Technical status readout
+- Footer: NOTHING IS SENT TO A SERVER / SUPPORTED: JPG / JPEG / PNG / WEBP
 
 ## Verified evidence
 

@@ -1,4 +1,4 @@
-const CACHE = "neon-scale-v1";
+const CACHE = "neon-scale-v2";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

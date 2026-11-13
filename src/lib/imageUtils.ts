@@ -4,10 +4,17 @@ export interface ImageInfo {
   hasAlpha: boolean;
 }
 
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_DIM = 8192;
+
 export async function decodeImage(file: File): Promise<{ bitmap: ImageBitmap; info: ImageInfo }> {
   if (!file.type.startsWith("image/")) throw new Error("Unsupported file type");
+  if (file.size > MAX_FILE_BYTES) throw new Error("File too large (max 25MB)");
   const bitmap = await createImageBitmap(file);
-  // detect alpha by drawing to canvas and sampling? Heuristic: check type
+  if (bitmap.width > MAX_DIM || bitmap.height > MAX_DIM) {
+    bitmap.close();
+    throw new Error(`Image too large (${bitmap.width}x${bitmap.height})`);
+  }
   const hasAlpha = file.type === "image/png" || file.type === "image/webp";
   return { bitmap, info: { width: bitmap.width, height: bitmap.height, hasAlpha } };
 }

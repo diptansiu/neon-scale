@@ -1,5 +1,12 @@
 # Project Status
 
+## Stage 3 (Production Hardening) — completed
+
+- Cloud runCloud hardened: timeouts (submit 60s, stream 300s, result 60s), quota/rate-limit detection, stale-job guard, better error messages.
+- Image validation: max file size 25MB, max dimension 8192px.
+- Cloud-space app.py: dimension + format validation, alpha handling, temp cleanup via Gradio.
+- 14 tests pass, build succeeds.
+
 ## Stage 2 (Quality/Performance/Reliability) — completed
 
 - Memory-aware tile sizing (64/96/128 based on pixel count).

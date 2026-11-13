@@ -180,6 +180,7 @@ export default function App() {
     if (!file) { setError("No image loaded"); return; }
     setError("");
     cancelledRef.current = false;
+    const thisJob = ++jobIdRef.current;
     setStatus("validating");
     setProgress(0);
     setMessage("Validating image");
@@ -214,11 +215,15 @@ export default function App() {
         meta: { _type: "gradio.FileData" },
       };
 
+      const submitCtrl = new AbortController();
+      const submitTimer = setTimeout(() => submitCtrl.abort(), 60000);
       const submitRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: [fileData] }),
+        signal: submitCtrl.signal,
       });
+      clearTimeout(submitTimer);
       if (!submitRes.ok) throw new Error(`Submit failed: ${submitRes.status}`);
       const submitJson = await submitRes.json();
       const eventId = submitJson.event_id;
@@ -228,8 +233,11 @@ export default function App() {
       setMessage("Queued");
       setProgress(0.3);
 
-      // Poll SSE stream
-      const streamRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict/${eventId}`);
+      // Poll SSE stream (with timeout)
+      const streamCtrl = new AbortController();
+      const streamTimer = setTimeout(() => streamCtrl.abort(), 300000);
+      const streamRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict/${eventId}`, { signal: streamCtrl.signal });
+      clearTimeout(streamTimer);
       if (!streamRes.ok) throw new Error(`Stream failed: ${streamRes.status}`);
       const text = await streamRes.text();
 
@@ -262,9 +270,13 @@ export default function App() {
       setProgress(0.85);
 
       // Fetch result image and convert
-      const imgRes = await fetch(resultUrl);
+      const imgCtrl = new AbortController();
+      const imgTimer = setTimeout(() => imgCtrl.abort(), 60000);
+      const imgRes = await fetch(resultUrl, { signal: imgCtrl.signal });
+      clearTimeout(imgTimer);
       if (!imgRes.ok) throw new Error(`Result fetch failed: ${imgRes.status}`);
       const blob = await imgRes.blob();
+      if (thisJob !== jobIdRef.current) return; // stale
       const objUrl = URL.createObjectURL(blob);
       resources.trackUrl(objUrl);
 
@@ -274,9 +286,6 @@ export default function App() {
       await img.decode();
       const outW = img.naturalWidth;
       const outH = img.naturalHeight;
-      if (info && (outW !== info.width * 4 || outH !== info.height * 4)) {
-        // not fatal, but note
-      }
 
       setResultUrl(objUrl);
       setResultInfo({ w: outW, h: outH });
@@ -285,12 +294,17 @@ export default function App() {
       setMessage("Completed");
       setProgress(1);
     } catch (e: any) {
-      if (cancelledRef.current || /cancel/i.test(e.message)) {
+      const msg = e?.message || String(e);
+      if (cancelledRef.current || /cancel/i.test(msg)) {
         setStatus("cancelled");
         setMessage("Cancelled");
+      } else if (/quota|rate.?limit|429/i.test(msg)) {
+        setStatus("failed");
+        setError("Cloud quota exhausted or rate-limited. Try again later or use Local AI.");
+        setMessage("Quota exceeded");
       } else {
         setStatus("failed");
-        setError(e.message);
+        setError(msg);
         setMessage("Failed");
       }
     }

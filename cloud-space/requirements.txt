@@ -1,0 +1,8 @@
+gradio==5.49.1
+spaces
+torch
+basicsr
+realesrgan
+Pillow
+numpy
+opencv-python-headless

@@ -38,3 +38,10 @@ npm test
 ## Deployment
 
 Static hosting (GitHub Pages / Cloudflare Pages / Netlify). See DEPLOYMENT.md. COOP/COEP headers recommended for SharedArrayBuffer.
+
+## Memory & performance
+
+- Object URLs are revoked when images are replaced.
+- Image validation: max 25 MB file size, max 8192 px dimension.
+- Memory-aware tile sizing (64/96/128 px based on pixel count).
+- Local engine uses WebGPU when available, WASM fallback otherwise.

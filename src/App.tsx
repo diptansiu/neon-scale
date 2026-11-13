@@ -11,7 +11,7 @@ export default function App() {
   const [selectedModel] = useState("realesrgan-x4plus");
   const [variant] = useState<"fp32" | "fp16">("fp32");
   const [mode, setMode] = useState<"local" | "cloud">(() => (localStorage.getItem("neon-mode") as "local" | "cloud") || "local");
-  const [cloudModel, setCloudModel] = useState<CloudModel>(CLOUD_MODELS[0]);
+  const [cloudModel] = useState<CloudModel>(CLOUD_MODELS[0]);
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupModelName, setPopupModelName] = useState("");
   const [consentGiven, setConsentGiven] = useState(() => localStorage.getItem("neon-cloud-consent") === "1");
@@ -39,6 +39,8 @@ export default function App() {
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [comparePos, setComparePos] = useState(50);
   const [dragging, setDragging] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [sideBySide, setSideBySide] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentFileRef = useRef<File | null>(null);
@@ -46,18 +48,9 @@ export default function App() {
   const cancelledRef = useRef(false);
   const jobIdRef = useRef(0);
 
-  useEffect(() => {
-    detectCapabilities().then(setCaps);
-  }, []);
-
-  useEffect(() => {
-    hasCachedModel(selectedModel, variant).then(setCached);
-  }, [selectedModel, variant]);
-
-  useEffect(() => {
-    localStorage.setItem("neon-mode", mode);
-  }, [mode]);
-
+  useEffect(() => { detectCapabilities().then(setCaps); }, []);
+  useEffect(() => { hasCachedModel(selectedModel, variant).then(setCached); }, [selectedModel, variant]);
+  useEffect(() => { localStorage.setItem("neon-mode", mode); }, [mode]);
   useEffect(() => {
     if (!popupOpen) return;
     const t = setTimeout(() => setPopupOpen(false), 4000);
@@ -74,6 +67,7 @@ export default function App() {
       setOriginalInfo({ w: info.width, h: info.height });
       setResultUrl("");
       setResultInfo(null);
+      setElapsedMs(null);
       currentFileRef.current = file;
       bitmap.close();
     } catch (e: any) {
@@ -146,6 +140,7 @@ export default function App() {
         tileSize,
         overlap,
       });
+      if (thisJob !== jobIdRef.current) return;
       setElapsedMs(result.elapsedMs ?? null);
 
       setStatus("postprocessing");
@@ -154,7 +149,7 @@ export default function App() {
 
       const outImageData = new ImageData(result.rgba, result.width, result.height);
       const blob = await imageDataToBlob(outImageData, "image/png");
-      if (thisJob !== jobIdRef.current) return; // stale job
+      if (thisJob !== jobIdRef.current) return;
       const url = URL.createObjectURL(blob);
       resources.trackUrl(url);
       setResultUrl(url);
@@ -194,7 +189,6 @@ export default function App() {
 
       const CLOUD_URL = "https://dipumeh-neon-scale-cloud.hf.space";
 
-      // Convert file to base64 data URL
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
@@ -233,7 +227,6 @@ export default function App() {
       setMessage("Queued");
       setProgress(0.3);
 
-      // Poll SSE stream (with timeout)
       const streamCtrl = new AbortController();
       const streamTimer = setTimeout(() => streamCtrl.abort(), 300000);
       const streamRes = await fetch(`${CLOUD_URL}/gradio_api/call/predict/${eventId}`, { signal: streamCtrl.signal });
@@ -241,12 +234,10 @@ export default function App() {
       if (!streamRes.ok) throw new Error(`Stream failed: ${streamRes.status}`);
       const text = await streamRes.text();
 
-      // Parse SSE for complete event
       let resultUrl: string | null = null;
-      const lines = text.split("\\n");
+      const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].startsWith("event: complete")) {
-          // next data line
           const dataLine = lines[i + 1];
           if (dataLine && dataLine.startsWith("data:")) {
             const jsonStr = dataLine.slice(5).trim();
@@ -269,18 +260,16 @@ export default function App() {
       setMessage("Retrieving result");
       setProgress(0.85);
 
-      // Fetch result image and convert
       const imgCtrl = new AbortController();
       const imgTimer = setTimeout(() => imgCtrl.abort(), 60000);
       const imgRes = await fetch(resultUrl, { signal: imgCtrl.signal });
       clearTimeout(imgTimer);
       if (!imgRes.ok) throw new Error(`Result fetch failed: ${imgRes.status}`);
       const blob = await imgRes.blob();
-      if (thisJob !== jobIdRef.current) return; // stale
+      if (thisJob !== jobIdRef.current) return;
       const objUrl = URL.createObjectURL(blob);
       resources.trackUrl(objUrl);
 
-      // Validate dimensions (decode)
       const img = new Image();
       img.src = objUrl;
       await img.decode();
@@ -331,11 +320,7 @@ export default function App() {
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext("2d")!;
-      if (transparentBg === "white") {
-        ctx.fillStyle = "#ffffff";
-      } else {
-        ctx.fillStyle = "#000000";
-      }
+      ctx.fillStyle = transparentBg === "white" ? "#ffffff" : "#000000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
       canvas.toBlob((b) => { if (b) downloadBlob(b, `neon-scale-${Date.now()}.jpg`); }, "image/jpeg", jpegQuality / 100);
@@ -350,7 +335,7 @@ export default function App() {
   const predictedW = originalInfo ? originalInfo.w * 4 : 0;
   const predictedH = originalInfo ? originalInfo.h * 4 : 0;
 
-  const busy = status === "processing" || status === "loading_model" || status === "preparing" || status === "validating";
+  const busy = status === "processing" || status === "loading_model" || status === "preparing" || status === "validating" || status === "uploading" || status === "queued" || status === "retrieving" || status === "checking_provider";
 
   return (
     <div className="app">
@@ -369,7 +354,6 @@ export default function App() {
 
       <main>
         <div className="container">
-          {/* Hero */}
           <section className="hero">
             <div className="eyebrow">BROWSER-ONLY / PRIVATE BY DESIGN</div>
             <h1>SCALE THE SIGNAL.</h1>
@@ -381,7 +365,6 @@ export default function App() {
             </div>
           </section>
 
-          {/* Mode selector */}
           <section className="section" style={{ paddingTop: 24, paddingBottom: 24 }}>
             <div className="section-head">
               <span className="section-num">MODE</span>
@@ -408,14 +391,13 @@ export default function App() {
                 <span className="fmt-sub">REMOTE · {cloudModel.status.toUpperCase()}</span>
               </button>
             </div>
-            {mode === "cloud" && (
+            {mode === "cloud" && cloudModel.status !== "available" && (
               <div className="msg info" style={{ marginTop: 12 }}>
                 Cloud mode: {cloudModel.blockReason || "Remote inference not yet available."}
               </div>
             )}
           </section>
 
-          {/* 01 Input signal */}
           <section className="section">
             <div className="section-head">
               <span className="section-num">01</span>
@@ -453,7 +435,6 @@ export default function App() {
                 {downloading && <div className="msg info">Downloading model… {Math.round(dlProgress * 100)}%</div>}
               </div>
 
-              {/* 02 Scale protocol */}
               <div className="stack">
                 <div className="section-head" style={{ marginBottom: 12 }}>
                   <span className="section-num">02</span>
@@ -526,7 +507,6 @@ export default function App() {
                 {message && <div className="msg info">{status.toUpperCase()} — {message}</div>}
                 {status === "completed" && <div className="msg ok">COMPLETE · {resultInfo?.w} × {resultInfo?.h}{elapsedMs ? ` · ${elapsedMs}ms` : ""}</div>}
 
-                {/* Technical status */}
                 <div className="card-soft" style={{ marginTop: 16 }}>
                   <div className="eyebrow" style={{ marginBottom: 8 }}>TECHNICAL STATUS</div>
                   <div className="tech-grid">
@@ -548,7 +528,6 @@ export default function App() {
             </div>
           </section>
 
-          {/* 03 Inspection bay */}
           <section className="section">
             <div className="section-head">
               <span className="section-num">03</span>
@@ -561,17 +540,36 @@ export default function App() {
                 </div>
               ) : (
                 <div>
-                  <div className="compare-wrap">
-                    <img src={originalUrl} alt="original" />
-                    <div className="clip" style={{ width: `${comparePos}%` }}>
-                      <img src={resultUrl} alt="result" />
-                    </div>
+                  <div className="row" style={{ marginBottom: 12 }}>
+                    <button className="btn-ghost" onClick={() => setZoom((z) => Math.max(0.25, z / 1.25))}>ZOOM -</button>
+                    <button className="btn-ghost" onClick={() => setZoom(1)}>100%</button>
+                    <button className="btn-ghost" onClick={() => setZoom((z) => Math.min(4, z * 1.25))}>ZOOM +</button>
+                    <button className="btn-ghost" onClick={() => setZoom(0)}>FIT</button>
+                    <button className="btn-ghost" onClick={() => setSideBySide((s) => !s)}>{sideBySide ? "SLIDER" : "SIDE BY SIDE"}</button>
                   </div>
-                  <input className="slider" type="range" min={0} max={100} value={comparePos} onChange={(e) => setComparePos(Number(e.target.value))} />
+                  {sideBySide ? (
+                    <div className="grid-2">
+                      <div className="img-frame" style={{ overflow: "auto" }}>
+                        <img src={originalUrl} alt="original" style={{ transform: zoom ? `scale(${zoom})` : "none", transformOrigin: "center center" }} />
+                      </div>
+                      <div className="img-frame" style={{ overflow: "auto" }}>
+                        <img src={resultUrl} alt="result" style={{ transform: zoom ? `scale(${zoom})` : "none", transformOrigin: "center center" }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="compare-wrap" style={{ overflow: "auto" }}>
+                      <img src={originalUrl} alt="original" style={{ transform: zoom ? `scale(${zoom})` : "none", transformOrigin: "center center" }} />
+                      <div className="clip" style={{ width: `${comparePos}%`, overflow: "hidden" }}>
+                        <img src={resultUrl} alt="result" style={{ transform: zoom ? `scale(${zoom})` : "none", transformOrigin: "center center" }} />
+                      </div>
+                    </div>
+                  )}
+                  {!sideBySide && <input className="slider" type="range" min={0} max={100} value={comparePos} onChange={(e) => setComparePos(Number(e.target.value))} aria-label="Comparison slider" />}
                   <div className="info-row">
                     <span>ORIGINAL <strong>{originalInfo?.w} × {originalInfo?.h}</strong></span>
                     <span>OUTPUT <strong>{resultInfo?.w} × {resultInfo?.h}</strong></span>
                     <span>SCALE <strong>4×</strong></span>
+                    <span>ZOOM <strong>{zoom ? `${Math.round(zoom * 100)}%` : "FIT"}</strong></span>
                   </div>
                   <div className="dl-row">
                     <button className="btn-dl" onClick={exportFile} disabled={!resultUrl}>
@@ -582,31 +580,34 @@ export default function App() {
               )}
               {!resultUrl && originalUrl && (
                 <div style={{ marginTop: 16 }}>
-                  <div className="img-frame">
-                    <img src={originalUrl} alt="original" />
+                  <div className="img-frame" style={{ overflow: "auto" }}>
+                    <img src={originalUrl} alt="original" style={{ transform: zoom ? `scale(${zoom})` : "none", transformOrigin: "center center" }} />
                   </div>
                 </div>
               )}
             </div>
           </section>
         </div>
-      {/* Model info popup */}
+      </main>
+
+      <footer className="footer">
+        <div className="container">
+          <div className="footer-row">
+            <span>NOTHING IS SENT TO A SERVER</span>
+            <span>SUPPORTED: JPG / JPEG / PNG / WEBP</span>
+          </div>
+        </div>
+      </footer>
+
       {popupOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          style={{
-            position: "fixed", inset: 0, background: "rgba(1,6,9,0.7)", display: "flex",
-            alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16,
-          }}
+          style={{ position: "fixed", inset: 0, background: "rgba(1,6,9,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}
           onClick={() => setPopupOpen(false)}
           onKeyDown={(e) => { if (e.key === "Escape") setPopupOpen(false); }}
         >
-          <div
-            className="card"
-            style={{ maxWidth: 480, width: "100%" }}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="card" style={{ maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
             <div className="section-head" style={{ marginBottom: 12 }}>
               <span className="section-num">INFO</span>
               <span className="section-title">MODEL INFORMATION</span>
@@ -623,7 +624,7 @@ export default function App() {
             <div className="msg info" style={{ marginTop: 12 }}>
               {mode === "local"
                 ? "Local AI runs entirely in your browser. No data leaves your device."
-                : "Cloud mode requires a remote provider. Currently blocked pending a verified free endpoint."}
+                : "Cloud mode: remote inference via Hugging Face ZeroGPU (DipuMeh/neon-scale-cloud)."}
             </div>
             <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
               <button className="btn-ghost" onClick={() => setPopupOpen(false)}>CLOSE</button>
@@ -632,16 +633,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Consent dialog */}
       {showConsent && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed", inset: 0, background: "rgba(1,6,9,0.8)", display: "flex",
-            alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16,
-          }}
-        >
+        <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, background: "rgba(1,6,9,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
           <div className="card" style={{ maxWidth: 480, width: "100%" }}>
             <div className="section-head" style={{ marginBottom: 12 }}>
               <span className="section-num">CONSENT</span>
@@ -657,17 +650,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      </main>
-
-      <footer className="footer">
-        <div className="container">
-          <div className="footer-row">
-            <span>NOTHING IS SENT TO A SERVER</span>
-            <span>SUPPORTED: JPG / JPEG / PNG / WEBP</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

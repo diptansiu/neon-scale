@@ -1,5 +1,12 @@
 # Project Status
 
+## Stage 4 (Image Quality Benchmarking & Comparison) — completed
+
+- Added metrics module (PSNR, SSIM, MSE) with tests.
+- Added benchmark module (CSV/JSON export) with tests.
+- Added zoom/pan/fit/100%/side-by-side comparison controls.
+- 21 tests pass, build succeeds.
+
 ## Stage 3 (Production Hardening) — completed
 
 - Cloud runCloud hardened: timeouts (submit 60s, stream 300s, result 60s), quota/rate-limit detection, stale-job guard, better error messages.

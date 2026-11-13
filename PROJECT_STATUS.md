@@ -1,70 +1,59 @@
-# Project Status
+# Project Status — NEON//SCALE v1.0
 
-## Stage 5 (Performance Engineering) — completed
+## Verified baseline (current repository)
 
-- memoryPreflight() + estimateMemory() with 8192px / 25MB limits.
-- Object URL revocation on image replacement.
-- 25MB / 8192px preflight guards.
-- Memory lifecycle tests (tiling, output dimensions, preflight).
-- 24 tests pass, build succeeds.
+- React + TypeScript + Vite frontend.
+- Local Real-ESRGAN 4× inference via ONNX Runtime Web (WebGPU preferred, WASM fallback).
+- Web Workers, tiled inference with overlap blending.
+- Model download, SHA-256 verification, IndexedDB caching.
+- Cloud AI via Hugging Face ZeroGPU Space (dipumeh-neon-scale-cloud.hf.space), RealESRGAN_x4plus.
+- Cloud privacy consent dialog; cloud mode independent of local mode.
+- Image comparison (slider, zoom, fit, 100%, side-by-side).
+- PSNR/SSIM/MSE metrics; benchmark runner with CSV/JSON export.
+- Image validation (25 MB file, 8192 px dimension), memory preflight, object-URL lifecycle.
+- PWA: service worker + manifest + offline caching.
+- Dark NEON//SCALE technical interface (Base44-inspired).
 
-## Stage 4 (Image Quality Benchmarking & Comparison) — completed
+## Verified test results
 
-- Added metrics module (PSNR, SSIM, MSE) with tests.
-- Added benchmark module (CSV/JSON export) with tests.
-- Added zoom/pan/fit/100%/side-by-side comparison controls.
-- 21 tests pass, build succeeds.
+- `npm test`: 7 test files, 27 tests — all PASS.
+- `npm run build`: succeeds (production).
+- `tsc -b` / typecheck: passes (part of build).
 
-## Stage 3 (Production Hardening) — completed
+## Verified inference
 
-- Cloud runCloud hardened: timeouts (submit 60s, stream 300s, result 60s), quota/rate-limit detection, stale-job guard, better error messages.
-- Image validation: max file size 25MB, max dimension 8192px.
-- Cloud-space app.py: dimension + format validation, alpha handling, temp cleanup via Gradio.
-- 14 tests pass, build succeeds.
+- Local AI: 32×32 input → 128×128 output (4×), WebGPU provider, SHA-256 model verified, cached in IndexedDB.
+- Cloud AI: 64×64 red PNG → 256×256 output (4×) on Hugging Face ZeroGPU (zero-a10g), content-type image/webp, queue + SSE polling verified.
 
-## Stage 2 (Quality/Performance/Reliability) — completed
+## Cloud model
 
-- Memory-aware tile sizing (64/96/128 based on pixel count).
-- Shared tile planner (planTiles) used by worker and tests.
-- Job staleness guard (jobIdRef) prevents stale results overwriting newer ones.
-- Performance timing reported from worker (elapsedMs) and shown in UI.
-- Worker crash handler (onerror).
-- ARIA labels on dropzone and progress bar.
-- 14 unit tests pass (added 6 tiling tests).
+- Space: https://dipumeh-neon-scale-cloud.hf.space
+- Endpoint: POST /gradio_api/call/predict → {event_id}; GET /gradio_api/call/predict/{id} → SSE complete with result URL.
+- Hardware: ZeroGPU (zero-a10g), free tier (5 min/day for free account).
+- Status: VERIFIED (real inference performed). Quota-protected; no paid fallback.
+
+## Deployment
+
+- Repository: https://github.com/diptansiu/neon-scale (public)
+- Hosting: GitHub Pages (project site, URL https://diptansiu.github.io/neon-scale/)
+- Build: GitHub Actions (`npm ci` → `npm run build` → `actions/deploy-pages@v4`)
+- Vite base: `/neon-scale/` in production, `/` in dev.
+- SPA fallback: public/404.html redirects to index.html.
+- Pages deployment: BLOCKED on one-time manual step — enable Pages in repo Settings → Pages → Source: GitHub Actions. The CLI/API cannot create a first Pages site.
+- Workflow builds successfully; deploy step blocked until Pages is enabled once.
 
 ## Stage status
 
 | Stage | Status |
 |---|---|
 | 0 Foundation/Audit | VERIFIED |
-| 1 Processing engine | VERIFIED (unit tests) |
+| 1 Processing engine | VERIFIED |
 | 2 Real-ESRGAN inference | VERIFIED (browser test: 32x32 -> 128x128, WebGPU) |
-| 3 Multi-model library | IMPLEMENTED (single validated model; others documented as planned) |
-| 4 Tiled inference | VERIFIED (code path exercised on small image; geometry unit-tested) |
-| 5 Workspace UI | VERIFIED (restored to original Base44 NEON//SCALE layout) |
-| 6 Advanced enhancement | NOT STARTED |
-| 7 Performance optimization | IMPLEMENTED (basic) |
-| 8 Offline/PWA | IMPLEMENTED (SW + IndexedDB) |
-| 9 Image fidelity | IMPLEMENTED (alpha bilinear, JPEG matte) |
-| 10 Browser compatibility | IMPLEMENTED (runtime detection) |
-| 11 QA | VERIFIED (8 unit tests pass; manual browser test passed) |
-| 12 PWA/Deployment | IMPLEMENTED |
+| 3 Production hardening | VERIFIED (timeouts, quota handling, stale-job guard, image validation) |
+| 4 Image quality benchmarking | VERIFIED (PSNR/SSIM/MSE, benchmark export, comparison controls) |
+| 5 Performance engineering | VERIFIED (memory preflight, object-URL lifecycle, tiling, 27 tests) |
+| 6 Release readiness | IN PROGRESS (build+tests pass; deploy blocked on Pages UI enablement) |
 
-## UI restoration
+## Release-blocking item
 
-Restored original Base44 NEON//SCALE layout from https://image-upscale.base44.app/:
-- Brand NEON//SCALE, LOCAL IMAGE ENLARGER / v1.0.0
-- Hero "SCALE THE SIGNAL."
-- Sections 01 Input signal, 02 Scale protocol, 03 Inspection bay
-- Design tokens: bg #010609, text #d0e7e5, cyan #00f0e8, green #a2f320, border #073036
-- Fonts: Space Grotesk + IBM Plex Mono
-- Scale/format/transparent-bg buttons matching reference
-- Technical status readout
-- Footer: NOTHING IS SENT TO A SERVER / SUPPORTED: JPG / JPEG / PNG / WEBP
-
-## Verified evidence
-
-- `npm test`: 3 files, 8 tests pass.
-- `npm run build`: succeeds.
-- Browser: upload 32x32 PNG, upscale -> 128x128 output, provider WebGPU, no errors.
-- Model SHA-256 verified at download time.
+- GitHub Pages first-time enablement must be done once in the repo UI (Settings → Pages → Source: GitHub Actions → branch: master). The REST API cannot create a first Pages site. After that, every push to master auto-builds and deploys.

@@ -52,6 +52,32 @@ export const MODEL_REGISTRY: ModelMeta[] = [
   },
 ];
 
+export interface CloudModel {
+  id: string;
+  name: string;
+  provider: string;
+  architecture: string;
+  nativeScale: number;
+  description: string;
+  license: string;
+  status: "available" | "blocked" | "planned";
+  blockReason?: string;
+}
+
+export const CLOUD_MODELS: CloudModel[] = [
+  {
+    id: "cloud-realesrgan-x4",
+    name: "Real-ESRGAN x4 (Cloud)",
+    provider: "Hugging Face (free tier)",
+    architecture: "RRDBNet",
+    nativeScale: 4,
+    description: "Remote inference via free Hugging Face endpoint. Requires backend proxy for secure credentials.",
+    license: "BSD-3-Clause (weights)",
+    status: "blocked",
+    blockReason: "No secure backend proxy available; free-tier quota and CORS unverified. Local mode fully functional.",
+  },
+];
+
 export function getModel(id: string): ModelMeta | undefined {
   return MODEL_REGISTRY.find((m) => m.id === id);
 }

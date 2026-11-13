@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { detectCapabilities, preferredProviders, Capabilities } from "./lib/capabilities";
-import { MODEL_REGISTRY } from "./lib/modelRegistry";
+import { MODEL_REGISTRY, CLOUD_MODELS, CloudModel } from "./lib/modelRegistry";
 import { downloadModel, hasCachedModel, getModelObjectUrl, deleteCachedModel } from "./lib/modelDownloader";
 import { InferenceWorkerClient } from "./lib/workerClient";
 import { decodeImage, bitmapToImageData, imageDataToBlob, downloadBlob } from "./lib/imageUtils";
@@ -10,6 +10,12 @@ export default function App() {
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [selectedModel] = useState("realesrgan-x4plus");
   const [variant] = useState<"fp32" | "fp16">("fp32");
+  const [mode, setMode] = useState<"local" | "cloud">(() => (localStorage.getItem("neon-mode") as "local" | "cloud") || "local");
+  const [cloudModel, setCloudModel] = useState<CloudModel>(CLOUD_MODELS[0]);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupModelName, setPopupModelName] = useState("");
+  const [consentGiven, setConsentGiven] = useState(() => localStorage.getItem("neon-cloud-consent") === "1");
+  const [showConsent, setShowConsent] = useState(false);
   const [scale, setScale] = useState<2 | 4 | 8>(4);
   const [format, setFormat] = useState<"png" | "jpeg">("png");
   const [jpegQuality, setJpegQuality] = useState(92);
@@ -46,6 +52,16 @@ export default function App() {
     hasCachedModel(selectedModel, variant).then(setCached);
   }, [selectedModel, variant]);
 
+  useEffect(() => {
+    localStorage.setItem("neon-mode", mode);
+  }, [mode]);
+
+  useEffect(() => {
+    if (!popupOpen) return;
+    const t = setTimeout(() => setPopupOpen(false), 4000);
+    return () => clearTimeout(t);
+  }, [popupOpen]);
+
   const handleFile = useCallback(async (file: File) => {
     setError("");
     try {
@@ -73,6 +89,7 @@ export default function App() {
   const run = useCallback(async () => {
     const file = currentFileRef.current;
     if (!file) { setError("No image loaded"); return; }
+    if (mode === "cloud") { setError("Cloud inference is not available: no verified free endpoint configured."); return; }
     if (scale !== 4) { setError("Only 4× AI upscaling is supported by the loaded model."); return; }
     setError("");
     cancelledRef.current = false;
@@ -222,6 +239,40 @@ export default function App() {
               <span className="icon">◆</span>
               <span>INPUT IS PROCESSED LOCALLY</span>
             </div>
+          </section>
+
+          {/* Mode selector */}
+          <section className="section" style={{ paddingTop: 24, paddingBottom: 24 }}>
+            <div className="section-head">
+              <span className="section-num">MODE</span>
+              <span className="section-title">PROCESSING MODE</span>
+            </div>
+            <div className="format-grid">
+              <button
+                className={`format-btn ${mode === "local" ? "active" : ""}`}
+                onClick={() => { setMode("local"); setPopupModelName("Real-ESRGAN x4plus"); setPopupOpen(true); }}
+              >
+                <span className="fmt-name">LOCAL AI</span>
+                <span className="fmt-sub">ON-DEVICE · PRIVATE</span>
+              </button>
+              <button
+                className={`format-btn ${mode === "cloud" ? "active" : ""}`}
+                onClick={() => {
+                  setMode("cloud");
+                  setPopupModelName(cloudModel.name);
+                  setPopupOpen(true);
+                  if (!consentGiven) setShowConsent(true);
+                }}
+              >
+                <span className="fmt-name">CLOUD AI</span>
+                <span className="fmt-sub">REMOTE · {cloudModel.status.toUpperCase()}</span>
+              </button>
+            </div>
+            {mode === "cloud" && (
+              <div className="msg info" style={{ marginTop: 12 }}>
+                Cloud mode: {cloudModel.blockReason || "Remote inference not yet available."}
+              </div>
+            )}
           </section>
 
           {/* 01 Input signal */}
@@ -396,6 +447,74 @@ export default function App() {
             </div>
           </section>
         </div>
+      {/* Model info popup */}
+      {popupOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed", inset: 0, background: "rgba(1,6,9,0.7)", display: "flex",
+            alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16,
+          }}
+          onClick={() => setPopupOpen(false)}
+          onKeyDown={(e) => { if (e.key === "Escape") setPopupOpen(false); }}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 480, width: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <span className="section-num">INFO</span>
+              <span className="section-title">MODEL INFORMATION</span>
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, letterSpacing: 1, color: "var(--text)", marginBottom: 8 }}>
+              {popupModelName}
+            </div>
+            <div className="tech-grid">
+              <div className="tech-row"><span className="tech-key">Mode</span><span className="tech-val">{mode.toUpperCase()}</span></div>
+              <div className="tech-row"><span className="tech-key">Scale</span><span className="tech-val">4×</span></div>
+              <div className="tech-row"><span className="tech-key">License</span><span className="tech-val">BSD-3-CLAUSE</span></div>
+              <div className="tech-row"><span className="tech-key">Engine</span><span className="tech-val">ONNX RUNTIME WEB</span></div>
+            </div>
+            <div className="msg info" style={{ marginTop: 12 }}>
+              {mode === "local"
+                ? "Local AI runs entirely in your browser. No data leaves your device."
+                : "Cloud mode requires a remote provider. Currently blocked pending a verified free endpoint."}
+            </div>
+            <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+              <button className="btn-ghost" onClick={() => setPopupOpen(false)}>CLOSE</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Consent dialog */}
+      {showConsent && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed", inset: 0, background: "rgba(1,6,9,0.8)", display: "flex",
+            alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16,
+          }}
+        >
+          <div className="card" style={{ maxWidth: 480, width: "100%" }}>
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <span className="section-num">CONSENT</span>
+              <span className="section-title">CLOUD PROCESSING DISCLOSURE</span>
+            </div>
+            <div className="msg info">
+              Cloud mode uploads your image to a remote provider for processing. The provider may store the image temporarily. Local processing is fully private. Confirm to enable cloud mode.
+            </div>
+            <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+              <button className="btn-ghost" onClick={() => { setShowConsent(false); setMode("local"); }}>CANCEL</button>
+              <button className="btn-choose" onClick={() => { setConsentGiven(true); localStorage.setItem("neon-cloud-consent", "1"); setShowConsent(false); }}>I UNDERSTAND</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       </main>
 
       <footer className="footer">

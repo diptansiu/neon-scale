@@ -1,5 +1,13 @@
 # Project Status
 
+## Stage 5 (Performance Engineering) — completed
+
+- memoryPreflight() + estimateMemory() with 8192px / 25MB limits.
+- Object URL revocation on image replacement.
+- 25MB / 8192px preflight guards.
+- Memory lifecycle tests (tiling, output dimensions, preflight).
+- 24 tests pass, build succeeds.
+
 ## Stage 4 (Image Quality Benchmarking & Comparison) — completed
 
 - Added metrics module (PSNR, SSIM, MSE) with tests.
